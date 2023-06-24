@@ -1,11 +1,10 @@
 #include "mainwindow.h"
 #include <cassert>
 #include <set>
+#include <tuple>
 #include "rand.h"
-#include <QDebug>
-
-template<typename T>
-using s = std::set<T>;
+#include <fstream>
+#include <chrono>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -18,125 +17,55 @@ MainWindow::MainWindow(QWidget *parent)
     start();
 
     plot.legend->setVisible(true);
-    resize(700, 600);
+    resize(1400, 1000);
     setCentralWidget(&plot);
 }
 
 void MainWindow::start()
 {
-//    v<pr<qreal, qreal>> points = {
-//        {1, -1},
-//        {2, 0}
-//    };
+    QString func_str("y = %1x + %2");
+    QString leg_str("Result (batch %1)");
+    qreal k, b, lrk, lrb, dlt;
+    int mx_step, n;
+    std::ifstream fin(".\\file.input");
 
-//    v<QCPCurveData> way = linear_regression(points, 0.01, 1, 10000);
-//    make_way(way);
-    qreal const k{-0.5}, b{4};
-    auto points = get_points_by_line(20, k, b, 0, 10, 0.25);
+    if (!fin) {
+        qDebug() << "file doesn't exists";
+    }
+    fin >> k >> b >> lrk >> lrb >> dlt >> mx_step >> n;
+    fin.close();
+    qDebug() << "In:" << k << b << lrk << lrb << dlt << mx_step;
+
+    auto points = get_points_by_line(500, k, b, 0, 10, 2);
+    auto started = std::chrono::high_resolution_clock::now();
 //    set_points(points, "Points");
-//    set_line(k, b, "Expected line");
+//    set_line(k, b, "Expected");
 
-    auto f = [&points](qreal k, qreal b) noexcept -> qreal {
-        return mse(points, k, b)*100;
+//    auto result = linear_regression(points, 1, lrk, lrb, k, b, mx_step, dlt);
+//    qDebug() << std::get<2>(result) << func_str.arg(std::get<0>(result)).arg(std::get<1>(result));
+    auto momentum_result = momentum_linear_regression(points, lrk, lrb, k, b, mx_step, dlt);
+    auto nesterov_result = nesterov_linear_regression(points, lrk, lrb, k, b, mx_step, dlt);
+    auto adagrad_result = adagrad_linear_regression(points, lrk, lrb, k, b, mx_step, dlt);
+    auto rmsprop_result = rmsprop_linear_regression(points, lrk, lrb, k, b, mx_step, dlt);
+    auto adam_result = adam_linear_regression(points, lrk, lrb, k, b, mx_step, dlt);
+//    qDebug() << result.size() - 1 << func_str.arg(result.back().key).arg(result.back().value);
+
+    auto done = std::chrono::high_resolution_clock::now();
+    qDebug() << std::chrono::duration_cast<std::chrono::milliseconds>(done-started).count();
+
+//    set_line(result.back().key, result.back().value, "Result");
+//    set_line(std::get<0>(result), std::get<1>(result), "Result");
+
+    auto f = [&points] (qreal const k, qreal const b) {
+        return mse(points, k, b);
     };
 
-    set_color_map({-3, -1}, {3, 5}, {500, 500}, f);
-    auto way = linear_regression(points, {-2, 0.5}, {k, b}, 0.01, 20, 10000);
-    make_way(way);
-//    for (int i = 0; i < way.size()-1; ++i) {
-//        if ((i < 100 && i % 10 == 0) || i % 50 == 0) {
-//            set_line(way[i].key, way[i].value, "proc line");
-//        }
-//    }
-    //set_line(way.back().key, way.back().value, "result");
-}
-
-
-v<int> rand_seq(int const k, int const n)
-{
-    assert(k <= n && k >= 0);
-    v<int> elem(n), result;
-    int temp;
-    result.reserve(k);
-
-    for (int i = 0; i < n; ++i) {
-        elem[i] = i;
-    }
-
-    for (int i = 0; i < k; ++i) {
-        temp = random(0, static_cast<int>(elem.size()) - 1);
-        result.push_back(elem[temp]);
-        elem[temp] = elem.back();
-        elem.pop_back();
-    }
-
-    return result;
-}
-
-pr<qreal, qreal> lr_step(
-    const v<pr<qreal, qreal> > &points, qreal const k,
-    qreal const b,
-    qreal const lr,
-    int const n)
-{
-    assert(n > 0 && n <= points.size());
-    v<int> chosen_set = rand_seq(n, points.size());
-    qreal gradk{0}, gradb{0}, temp;
-
-    for (int i = 0; i < n; ++i) {
-        temp = points[chosen_set[i]].second - (k * points[chosen_set[i]].first + b);
-        gradk += points[chosen_set[i]].first * temp;
-        gradb += temp;
-    }
-    gradk *= (-2.) / n;
-    gradb *= (-2.) / n;
-
-    return { k - gradk * lr, b - gradb * lr };
-}
-
-qreal mse(const v<pr<qreal, qreal> > &points, const qreal k, const qreal b) noexcept
-{
-    auto f = [&k, &b](qreal x) noexcept {
-        return k * x + b;
-    };
-
-    qreal result{0}, temp;
-
-    for (auto const& elem : points) {
-        temp = elem.second - f(elem.first);
-        result += temp * temp;
-    }
-
-    return result / points.size();
-}
-
-v<QCPCurveData> linear_regression(
-    const v<pr<qreal, qreal> > &points,
-    pr<qreal, qreal> const& start,
-    pr<qreal, qreal> const& expected,
-    qreal const lr,
-    int const n,
-    int const max_step)
-{
-    v<QCPCurveData> way = {QCPCurveData(0, start.first, start.second)};
-    pr<qreal, qreal> cur = {way.back().key, way.back().value};
-    qreal f_cur;
-    qreal f_expected = mse(points, expected.first, expected.second);
-
-    qDebug() << "Start:" << cur.first << cur.sec дond;
-    for (int i = 1; i <= max_step; ++i) {
-        cur = lr_step(points, cur.first, cur.second, lr, n);
-        f_cur = mse(points, cur.first, cur.second);
-
-        if (std::abs(f_cur - f_expected) <= EPSILON) {
-            break;
-        }
-        qDebug() << "Added: " << i << cur.first << cur.second;
-        way.emplace_back(i, cur.first, cur.second);
-    }
-    qDebug() << "==============================";
-    qDebug() << "Number of steps:" << way.size() - 1;
-    return way;
+    set_color_map({-7.5, -2.5}, {7.5, 12.5}, {500, 500}, f);
+    make_way(momentum_result, "Momentum");
+    make_way(nesterov_result, "Nesterov");
+    make_way(adagrad_result, "AdaGrad");
+    make_way(rmsprop_result, "RMSProp");
+    make_way(adam_result, "Adam");
 }
 
 void MainWindow::set_color_map(QPointF const& left_bottom, QPointF const& right_top,
@@ -183,32 +112,55 @@ void MainWindow::set_color_map(QPointF const& left_bottom, QPointF const& right_
     color_map->rescaleAxes();
 }
 
-void MainWindow::make_way(v<QCPCurveData> const& way)
-{
-    QCPCurve *curve = new QCPCurve(plot.xAxis, plot.yAxis);
-    curve->setPen(QPen(QBrush(Qt::blue),2));
-    curve->setName("Way");
-    curve->data()->set(way, true);
-    plot.addGraph();
-    plot.graph()->addData(way[0].key, way[0].value);
-    plot.graph()->setName("Start");
-    plot.graph()->setPen(QPen(QBrush(),0));
-
-    QCPScatterStyle sc_begin(QCPScatterStyle::ssCross);
-    sc_begin.setPen(QPen(QBrush(Qt::green),2));
-    plot.graph()->setScatterStyle(sc_begin);
-
-    plot.addGraph();
-    plot.graph()->addData(way.back().key, way.back().value);
-    plot.graph()->setName("End");
-    plot.graph()->setPen(QPen(QBrush(),0));
-
-    QCPScatterStyle sc_end(QCPScatterStyle::ssTriangle);
-    sc_end.setPen(QPen(QBrush(Qt::red),2));
-    plot.graph()->setScatterStyle(sc_end);
+static QPen random_pen() {
+    static int arr[] = {3, 7, 8, 9, 10, 11, 12, 5};
+    static int cur = 1;
+    cur %= 8;
+    QPen pen = QPen(QBrush(static_cast<Qt::GlobalColor>(arr[cur++])), 1.5);
+    return pen;
+//    uchar main_colour = static_cast<uchar>(random(175, 255));
+//    uchar sc1 = static_cast<uchar>(random(25, 150));
+//    uchar sc2 = static_cast<uchar>(random(25, 150));
+//    switch (random(0, 2)) {
+//    case 0:
+//        pen = QPen(QBrush(QColor(main_colour, sc1, sc2)), 1.5);
+//        break;
+//    case 1:
+//        pen = QPen(QBrush(QColor(sc1, main_colour, sc2)), 1.5);
+//        break;
+//    case 2:
+//        pen = QPen(QBrush(QColor(sc1, sc2, main_colour)), 1.5);
+//        break;
+//    }
+//    return pen;
 }
 
-void MainWindow::set_points(const v<pr<qreal, qreal> > &points, const char* name)
+void MainWindow::make_way(v<QCPCurveData> const& way, QString const& name)
+{
+    QCPCurve *curve = new QCPCurve(plot.xAxis, plot.yAxis);
+    curve->setPen(random_pen());
+    curve->setName(name);
+    curve->data()->set(way, true);
+//    plot.addGraph();
+//    plot.graph()->addData(way[0].key, way[0].value);
+//    plot.graph()->setName("Start");
+//    plot.graph()->setPen(QPen(QBrush(),0));
+
+//    QCPScatterStyle sc_begin(QCPScatterStyle::ssCross);
+//    sc_begin.setPen(QPen(QBrush(Qt::green),2));
+//    plot.graph()->setScatterStyle(sc_begin);
+
+//    plot.addGraph();
+//    plot.graph()->addData(way.back().key, way.back().value);
+//    plot.graph()->setName("End");
+//    plot.graph()->setPen(QPen(QBrush(),0));
+
+//    QCPScatterStyle sc_end(QCPScatterStyle::ssTriangle);
+//    sc_end.setPen(QPen(QBrush(Qt::red),2));
+//    plot.graph()->setScatterStyle(sc_end);
+}
+
+void MainWindow::set_points(const way_t &points, QString const& name)
 {
     plot.addGraph();
     plot.graph()->setScatterStyle(QCPScatterStyle::ssDisc);
@@ -224,24 +176,10 @@ void MainWindow::set_points(const v<pr<qreal, qreal> > &points, const char* name
     plot.yAxis->setRange(y_range.lower - 0.05 * y_diff, y_range.upper + 0.05 * y_diff);
 }
 
-void MainWindow::set_line(const qreal k, const qreal b, const char* name)
+void MainWindow::set_line(const qreal k, const qreal b, QString const& name)
 {
     auto f = [&k, &b](qreal const x) { return k * x + b; };
-    uchar main_colour = static_cast<uchar>(random(175, 255));
-    uchar sc1 = static_cast<uchar>(random(25, 150));
-    uchar sc2 = static_cast<uchar>(random(25, 150));
-    QPen pen;
-    switch (random(0, 2)) {
-    case 0:
-        pen = QPen(QBrush(QColor(main_colour, sc1, sc2)), 2.5);
-        break;
-    case 1:
-        pen = QPen(QBrush(QColor(sc1, main_colour, sc2)), 2.5);
-        break;
-    case 2:
-        pen = QPen(QBrush(QColor(sc1, sc2, main_colour)), 2.5);
-        break;
-    }
+    QPen pen = random_pen();
     qreal const x_min = plot.xAxis->range().lower;
     qreal const x_max = plot.xAxis->range().upper;
     plot.addGraph();
@@ -250,13 +188,10 @@ void MainWindow::set_line(const qreal k, const qreal b, const char* name)
     plot.graph()->setName(name);
 }
 
-// 1 2 7 9
-// 9 1 7 2
 
-
-v<pr<qreal, qreal> > get_points_by_line(int n, const qreal k, const qreal b, const qreal x_min, const qreal x_max, const qreal delta)
+way_t get_points_by_line(int n, const qreal k, const qreal b, const qreal x_min, const qreal x_max, const qreal delta)
 {
-    v<pr<qreal, qreal>> points;
+    way_t points;
     qreal x_temp;
     while (n-- > 0) {
         x_temp = random(x_min, x_max, 5);

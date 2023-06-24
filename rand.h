@@ -2,7 +2,7 @@
 #define RAND_H
 #include <stddef.h>
 
-int random(long long begin, long long end);
+int random(int begin, int end);
 
 double random(double begin, double end, unsigned int precision);
 
